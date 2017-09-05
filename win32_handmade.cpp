@@ -6,7 +6,7 @@ LRESULT CALLBACK MainWindowCallback(HWND Window,
                                     LPARAM LParam)
 {
     LRESULT Result = 0;
-
+  
     switch (Message)
     {
         case WM_SIZE:
