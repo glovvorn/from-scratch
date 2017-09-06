@@ -6,8 +6,54 @@
 
 //TODO(greg): this is global for now
 global_variable bool Running;
+global_variable BITMAPINFO BitmapInfo;
+global_variable void *BitmapMemory;
+global_variable HBITMAP BitmapHandle;
+global_variable HDC BitmapDeviceContext;
 
-LRESULT CALLBACK MainWindowCallback(HWND Window,
+internal void Win32ResizeDIBSection(int Width, int Height)
+{
+    // TODO(greg): bulletproof this
+    // Maybe don't free first, free after, then free first if that fails
+
+    if(BitmapHandle)
+    {
+        DeleteObject(BitmapHandle);
+    }
+
+    if(BitmapDeviceContext)
+    {
+        // TODO(greg): should we recreate these under certain special circumstances?
+        BitmapDeviceContext = CreateCompatibleDC(0);
+    }
+
+    BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
+    BitmapInfo.bmiHeader.biWidth = Width;
+    BitmapInfo.bmiHeader.biHeight = Height;
+    BitmapInfo.bmiHeader.biPlanes = 1;
+    BitmapInfo.bmiHeader.biBitCount = 32;
+    BitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+    HBITMAP BitMapHandle = CreateDIBSection(
+        BitmapDeviceContext, 
+        &BitmapInfo,
+        DIB_RGB_COLORS,
+        &BitmapMemory,
+        0,
+        0);
+}
+
+internal void Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
+{
+    StretchDIBits(DeviceContext,
+        X, Y, Width, Height,
+        X, Y, Width, Height,
+        &BitmapMemory,
+        &BitmapInfo,
+        DIB_RGB_COLORS, SRCCOPY);
+}
+
+LRESULT CALLBACK Win32MainWindowCallback(HWND Window,
                                     UINT Message,
                                     WPARAM WParam,
                                     LPARAM LParam)
@@ -18,7 +64,11 @@ LRESULT CALLBACK MainWindowCallback(HWND Window,
     {
         case WM_SIZE:
         {
-
+            RECT ClientRect;
+            GetClientRect(Window, &ClientRect);
+            int Height = ClientRect.bottom - ClientRect.top;
+            int Width = ClientRect.right - ClientRect.left;
+            Win32ResizeDIBSection(Width, Height);
         } break;
         case WM_DESTROY:
         {
@@ -42,16 +92,7 @@ LRESULT CALLBACK MainWindowCallback(HWND Window,
             int y = Paint.rcPaint.top;
             int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
             int Width = Paint.rcPaint.right - Paint.rcPaint.left;
-            local_persist DWORD Operation = WHITENESS;
-            PatBlt(DeviceContext, x, y, Width, Height, Operation);
-            if (Operation == WHITENESS)
-            {
-                Operation = BLACKNESS;
-            }
-            else
-            {
-                Operation = WHITENESS;
-            }
+            Win32UpdateWindow(DeviceContext, x, y, Width, Height);
             EndPaint(Window, &Paint);
         } break;
         default:
@@ -71,7 +112,7 @@ int CALLBACK WinMain(
 {
     WNDCLASS WindowClass = {};
 
-    WindowClass.lpfnWndProc = MainWindowCallback;
+    WindowClass.lpfnWndProc = Win32MainWindowCallback;
     WindowClass.hInstance = Instance;
     //WindowClass.hIcon = ;
     WindowClass.lpszClassName = "HandmadeHeroWindowClass";
