@@ -8,6 +8,8 @@
 global_variable bool Running;
 global_variable BITMAPINFO BitmapInfo;
 global_variable void *BitmapMemory;
+global_variable int BitmapWidth;
+global_variable int BitmapHeight;
 
 internal void Win32ResizeDIBSection(int Width, int Height)
 {
@@ -18,6 +20,9 @@ internal void Win32ResizeDIBSection(int Width, int Height)
     {
         VirtualFree(BitmapMemory, 0, MEM_RELEASE);
     }
+
+    BitmapWidth = Width;
+    BitmapHeight = Height;
 
     BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
     BitmapInfo.bmiHeader.biWidth = Width;
@@ -31,11 +36,21 @@ internal void Win32ResizeDIBSection(int Width, int Height)
     BitmapMemory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
 }
 
-internal void Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
+internal void Win32UpdateWindow(HDC DeviceContext, RECT *WindowRect, int X, int Y, int Width, int Height)
 {
+    /*
+    */
+
+    int WindowWidth = WindowRect->right - WindowRect->left;
+    int WindowHeight = WindowRect->bottom - WindowRect->top;
+
     StretchDIBits(DeviceContext,
+        /*
         X, Y, Width, Height,
         X, Y, Width, Height,
+        */
+        0, 0, BitmapWidth, BitmapHeight,
+        0, 0, WindowWidth, WindowHeight,
         BitmapMemory,
         &BitmapInfo,
         DIB_RGB_COLORS, SRCCOPY);
