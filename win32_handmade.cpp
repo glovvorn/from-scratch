@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdint.h>
+#include <xinput.h>
 
 #define internal static
 #define local_persist static
@@ -22,7 +23,6 @@ struct win32_offscreen_buffer
     int Width;
     int Height;
     int Pitch;
-    int BytesPerPixel;
 };
 
 //TODO(greg): this is global for now
@@ -77,9 +77,10 @@ internal void Win32ResizeDIBSection(win32_offscreen_buffer *Buffer, int Width, i
         VirtualFree(Buffer->Memory, 0, MEM_RELEASE);
     }
 
+    int BytesPerPixel = 4;
+
     Buffer->Width = Width;
     Buffer->Height = Height;
-    Buffer->BytesPerPixel = 4;
 
     Buffer->Info.bmiHeader.biSize = sizeof(Buffer->Info.bmiHeader);
     Buffer->Info.bmiHeader.biWidth = Buffer->Width;
@@ -88,22 +89,18 @@ internal void Win32ResizeDIBSection(win32_offscreen_buffer *Buffer, int Width, i
     Buffer->Info.bmiHeader.biBitCount = 32;
     Buffer->Info.bmiHeader.biCompression = BI_RGB;
 
-    int BitmapMemorySize = (Buffer->Width * Buffer->Height) * Buffer->BytesPerPixel;
+    int BitmapMemorySize = (Buffer->Width * Buffer->Height) * BytesPerPixel;
     Buffer->Memory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
 
-    Buffer->Pitch = Width * Buffer->BytesPerPixel;
+    Buffer->Pitch = Width * BytesPerPixel;
 
     // TODO(greg): Clear this to black
 }
 
-internal void Win32DisplayBufferInWindow(HDC DeviceContext, int WindowWidth, int WindowHeight, win32_offscreen_buffer Buffer, int X, int Y, int Width, int Height)
+internal void Win32DisplayBufferInWindow(HDC DeviceContext, int WindowWidth, int WindowHeight, win32_offscreen_buffer Buffer)
 {
-    //TODO(greg): Aspect ration correction
+    //TODO(greg): Aspect ratio correction
     StretchDIBits(DeviceContext,
-                  /*
-                  X, Y, Width, Height,
-                  X, Y, Width, Height,
-                  */
                   0, 0, WindowWidth, WindowHeight,
                   0, 0, Buffer.Width, Buffer.Height,
                   Buffer.Memory,
@@ -144,14 +141,10 @@ LRESULT CALLBACK Win32MainWindowCallback(HWND Window,
     {
         PAINTSTRUCT Paint;
         HDC DeviceContext = BeginPaint(Window, &Paint);
-        int x = Paint.rcPaint.left;
-        int y = Paint.rcPaint.top;
-        int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
-        int Width = Paint.rcPaint.right - Paint.rcPaint.left;
 
         win32_window_dimensions Dimensions = Win32GetWindowDimensions(Window);
 
-        Win32DisplayBufferInWindow(DeviceContext, Dimensions.Width, Dimensions.Height, GlobalBackBuffer, x, y, Width, Height);
+        Win32DisplayBufferInWindow(DeviceContext, Dimensions.Width, Dimensions.Height, GlobalBackBuffer);
         EndPaint(Window, &Paint);
     }
     break;
@@ -175,7 +168,7 @@ int CALLBACK WinMain(
 
     Win32ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
 
-    WindowClass.style = CS_HREDRAW | CS_VREDRAW;
+    WindowClass.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
     WindowClass.lpfnWndProc = Win32MainWindowCallback;
     WindowClass.hInstance = Instance;
     //WindowClass.hIcon = ;
@@ -200,6 +193,8 @@ int CALLBACK WinMain(
 
         if (Window)
         {
+            HDC DeviceContext = GetDC(Window);
+
             int XOffset = 0;
             int YOffset = 0;
 
@@ -218,13 +213,24 @@ int CALLBACK WinMain(
                     DispatchMessage(&Message);
                 }
 
-                HDC DeviceContext = GetDC(Window);
+                //TODO(greg): should we poll this more frequently?
+                for(DWORD ControllerIndex = 0; ControllerIndex < XUSER_MAX_COUNT; ControllerIndex++)
+                {
+                    XINPUT_STATE ControllerState;
+                    if (XInputGetState(ControllerIndex, &ControllerState) == ERROR_SUCCESS)
+                    {
+                        //NOTE(greg): This controller is plugged in
+                    }
+                    else
+                    {
+                        //NOTE(greg): This controller is unplugged
+                    }
+                }
 
                 win32_window_dimensions Dimensions = Win32GetWindowDimensions(Window);
 
                 RenderWeirdGradient(GlobalBackBuffer, XOffset, YOffset);
-                Win32DisplayBufferInWindow(DeviceContext, Dimensions.Width, Dimensions.Height, GlobalBackBuffer, 0, 0, Dimensions.Width, Dimensions.Height);
-                ReleaseDC(Window, DeviceContext);
+                Win32DisplayBufferInWindow(DeviceContext, Dimensions.Width, Dimensions.Height, GlobalBackBuffer);
 
                 ++XOffset;
                 YOffset += 2;
