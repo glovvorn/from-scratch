@@ -31,14 +31,41 @@ struct win32_window_dimensions
     int Height;
 };
 
-typedef DWORD WINAPI x_input_get_state(DWORD dwUserIndex, XINPUT_STATE* pState);
-typedef DWORD WINAPI x_input_set_state(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration);
-
 //TODO(greg): this is global for now
 global_variable bool Running;
 global_variable win32_offscreen_buffer GlobalBackBuffer;
 
-win32_window_dimensions Win32GetWindowDimensions(HWND Window)
+//NOTE(greg): XInputGetState
+#define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
+typedef X_INPUT_GET_STATE(x_input_get_state);
+X_INPUT_GET_STATE(XInputGetStateStub)
+{
+    return (0);
+}
+global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
+#define XInputSetState XInputSetState_
+
+//NOTE(greg): XInputSetState
+#define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration)
+typedef X_INPUT_SET_STATE(x_input_set_state);
+X_INPUT_SET_STATE(XInputSetStateStub)
+{
+    return (0);
+}
+global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
+#define XInputGetState XInputGetState_
+
+internal void Win32LoadXInput(void)
+{
+    HMODULE XInputLibrary = LoadLibrary("xinput1_3.dll");
+    if (XInputLibrary)
+    {
+        XInputGetState = (x_input_get_state *)GetProcAddress(XInputLibrary, "XInputGetState");
+        XInputSetState = (x_input_set_state *)GetProcAddress(XInputLibrary, "XInputSetState");
+    }
+}
+
+internal win32_window_dimensions Win32GetWindowDimensions(HWND Window)
 {
     win32_window_dimensions Result;
 
@@ -120,14 +147,19 @@ LRESULT CALLBACK Win32MainWindowCallback(HWND Window,
 
     switch (Message)
     {
-    case WM_SIZE:
-    {
-    }
-    break;
     case WM_DESTROY:
     {
         //TODO(greg): recreate window?
         Running = false;
+    }
+    break;
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    {
+        uint32 VKCode = WParam;
+        LParam & (1 << 30);
     }
     break;
     case WM_CLOSE:
@@ -167,6 +199,8 @@ int CALLBACK WinMain(
     LPSTR CmdLine,
     int CmdShow)
 {
+    Win32LoadXInput();
+
     WNDCLASS WindowClass = {};
 
     Win32ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
@@ -217,10 +251,10 @@ int CALLBACK WinMain(
                 }
 
                 //TODO(greg): should we poll this more frequently?
-                for(DWORD ControllerIndex = 0; ControllerIndex < XUSER_MAX_COUNT; ControllerIndex++)
+                for (DWORD ControllerIndex = 0; ControllerIndex < XUSER_MAX_COUNT; ControllerIndex++)
                 {
                     XINPUT_STATE ControllerState;
-                    if (XInputGetState(ControllerIndex, &ControllerState) == ERROR_SUCCESS)
+                    if (XInputGetState_(ControllerIndex, &ControllerState) == ERROR_SUCCESS)
                     {
                         //NOTE(greg): This controller is plugged in
                         XINPUT_GAMEPAD *Pad = &ControllerState.Gamepad;
@@ -240,6 +274,16 @@ int CALLBACK WinMain(
 
                         int16 StickX = Pad->sThumbLX;
                         int16 StickY = Pad->sThumbLY;
+
+                        if (AButton)
+                        {
+                            YOffset += 2;
+                        }
+
+                        if (YButton)
+                        {
+                            YOffset -= 2;
+                        }
                     }
                     else
                     {
@@ -247,13 +291,17 @@ int CALLBACK WinMain(
                     }
                 }
 
+                // XINPUT_VIBRATION Vibration;
+                // Vibration.wLeftMotorSpeed = 60000;
+                // Vibration.wRightMotorSpeed = 60000;
+                // XInputSetState(0, &Vibration);
+
                 win32_window_dimensions Dimensions = Win32GetWindowDimensions(Window);
 
                 RenderWeirdGradient(GlobalBackBuffer, XOffset, YOffset);
                 Win32DisplayBufferInWindow(DeviceContext, Dimensions.Width, Dimensions.Height, GlobalBackBuffer);
 
                 ++XOffset;
-                YOffset += 2;
             }
         }
         else
