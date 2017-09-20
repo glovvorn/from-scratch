@@ -36,6 +36,7 @@ struct win32_window_dimensions
 //TODO(greg): this is global for now
 global_variable bool Running;
 global_variable win32_offscreen_buffer GlobalBackBuffer;
+global_variable LPDIRECTSOUNDBUFFER GlobalSecondaryBuffer;
 
 //NOTE(greg): XInputGetState
 #define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
@@ -134,8 +135,8 @@ internal void Win32InitDSound(HWND Window, int32 SamplesPerSecond, int32 BufferS
             BufferDescription.dwFlags = 0;
             BufferDescription.dwBufferBytes = BufferSize;
             BufferDescription.lpwfxFormat = &WaveFormat;
-            LPDIRECTSOUNDBUFFER SecondaryBuffer;
-            if (SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDescription, &SecondaryBuffer, 0)))
+
+            if (SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDescription, &GlobalSecondaryBuffer, 0)))
             {
             }
         }
@@ -205,7 +206,7 @@ internal void Win32ResizeDIBSection(win32_offscreen_buffer *Buffer, int Width, i
     Buffer->Info.bmiHeader.biCompression = BI_RGB;
 
     int BitmapMemorySize = (Buffer->Width * Buffer->Height) * BytesPerPixel;
-    Buffer->Memory = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
+    Buffer->Memory = VirtualAlloc(0, BitmapMemorySize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
     Buffer->Pitch = Width * BytesPerPixel;
 
@@ -365,8 +366,9 @@ int CALLBACK WinMain(
 
             int XOffset = 0;
             int YOffset = 0;
+            int SquareWaveCounter = 0;
 
-            Win32InitDSound(Window, 48000, 48000*sizeof(int16)*2);
+            Win32InitDSound(Window, 48000, 48000 * sizeof(int16) * 2);
 
             Running = true;
             while (Running)
@@ -417,17 +419,47 @@ int CALLBACK WinMain(
                     }
                 }
 
-                // XINPUT_VIBRATION Vibration;
-                // Vibration.wLeftMotorSpeed = 60000;
-                // Vibration.wRightMotorSpeed = 60000;
-                // XInputSetState(0, &Vibration);
+                RenderWeirdGradient(&GlobalBackBuffer, XOffset, YOffset);
+
+                // NOTE(greg): DirectSound output test
+                DWORD WritePointer;
+                DWORD BytesToWrite;
+
+                VOID *Region1;
+                DWORD Region1Size;
+                VOID *Region2;
+                DWORD Region2Size;
+                GlobalSecondaryBuffer->Lock(WritePointer, BytesToWrite,
+                                            &Region1, &Region1Size,
+                                            &Region2, &Region2Size,
+                                            0);
+
+                //TODO(greg): assert that region1size/region2size is valid
+                int16 *SampleOut = (int16 *)Region1;
+                for (DWORD SampleIndex = 0; SampleIndex < Region1Size; SampleIndex++)
+                {
+                    if (SquareWaveCounter)
+                    {
+                        SquareWaveCounter = SquareWavePeriod;
+                    }
+                    int16 SampleValue = (SquareWaveCounter > (SquareWavePeriod / 2)) ? 16000 : -16000;
+                    *SampleOut++ = SampleValue;
+                    *SampleOut++ = SampleValue;
+                }
+
+                for (DWORD SampleIndex = 0; SampleIndex < Region2Size; SampleIndex++)
+                {
+                    if (SquareWaveCounter)
+                    {
+                        SquareWaveCounter = SquareWavePeriod;
+                    }
+                    int16 SampleValue = (SquareWaveCounter > (SquareWavePeriod / 2)) ? 16000 : -16000;
+                    *SampleOut++ = SampleValue;
+                    *SampleOut++ = SampleValue;
+                }
 
                 win32_window_dimensions Dimensions = Win32GetWindowDimensions(Window);
-
-                RenderWeirdGradient(&GlobalBackBuffer, XOffset, YOffset);
                 Win32DisplayBufferInWindow(&GlobalBackBuffer, DeviceContext, Dimensions.Width, Dimensions.Height);
-
-                ++XOffset;
             }
         }
         else
