@@ -364,11 +364,22 @@ int CALLBACK WinMain(
         {
             HDC DeviceContext = GetDC(Window);
 
+            // NOTE(greg): graphics test
             int XOffset = 0;
             int YOffset = 0;
-            int SquareWaveCounter = 0;
 
-            Win32InitDSound(Window, 48000, 48000 * sizeof(int16) * 2);
+            // NOTE(greg): sound test
+            int SamplesPerSecond = 48000;
+            int Hz = 256;
+            int16 ToneVolume = 6000;
+            uint32 RunningSampleIndex = 0;
+            int SquareWavePeriod = SamplesPerSecond / Hz;
+            int HalfSquareWavePeriod = SquareWavePeriod / 2;
+            int BytesPerSample = sizeof(int16) * 2;
+            int SecondaryBufferSize = SamplesPerSecond * BytesPerSample;
+
+            Win32InitDSound(Window, SamplesPerSecond, SecondaryBufferSize);
+            GlobalSecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
 
             Running = true;
             while (Running)
@@ -421,41 +432,59 @@ int CALLBACK WinMain(
 
                 RenderWeirdGradient(&GlobalBackBuffer, XOffset, YOffset);
 
+                DWORD PlayCursor;
+                DWORD WriteCursor;
+
                 // NOTE(greg): DirectSound output test
-                DWORD WritePointer;
-                DWORD BytesToWrite;
-
-                VOID *Region1;
-                DWORD Region1Size;
-                VOID *Region2;
-                DWORD Region2Size;
-                GlobalSecondaryBuffer->Lock(WritePointer, BytesToWrite,
-                                            &Region1, &Region1Size,
-                                            &Region2, &Region2Size,
-                                            0);
-
-                //TODO(greg): assert that region1size/region2size is valid
-                int16 *SampleOut = (int16 *)Region1;
-                for (DWORD SampleIndex = 0; SampleIndex < Region1Size; SampleIndex++)
+                if (SUCCEEDED(GlobalSecondaryBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor)))
                 {
-                    if (SquareWaveCounter)
+                    DWORD ByteToLock = (RunningSampleIndex * BytesPerSample) % SecondaryBufferSize;
+                    DWORD BytesToWrite;
+                    if (ByteToLock > PlayCursor)
                     {
-                        SquareWaveCounter = SquareWavePeriod;
+                        BytesToWrite = (SecondaryBufferSize - ByteToLock);
+                        BytesToWrite += PlayCursor;
                     }
-                    int16 SampleValue = (SquareWaveCounter > (SquareWavePeriod / 2)) ? 16000 : -16000;
-                    *SampleOut++ = SampleValue;
-                    *SampleOut++ = SampleValue;
-                }
+                    else
+                    {
+                        BytesToWrite = PlayCursor - ByteToLock;
+                    }
+                    
+                    VOID *Region1;
+                    DWORD Region1Size;
+                    VOID *Region2;
+                    DWORD Region2Size;
 
-                for (DWORD SampleIndex = 0; SampleIndex < Region2Size; SampleIndex++)
-                {
-                    if (SquareWaveCounter)
+                    if (SUCCEEDED(GlobalSecondaryBuffer->Lock(ByteToLock, BytesToWrite,
+                                                              &Region1, &Region1Size,
+                                                              &Region2, &Region2Size,
+                                                              0)))
                     {
-                        SquareWaveCounter = SquareWavePeriod;
+
+                        //TODO(greg): assert that region1size/region2size is valid
+                        //TODO(greg): Collapse these two loops
+                        int16 *SampleOut = (int16 *)Region1;
+                        DWORD Region1SampleCount = Region1Size / BytesPerSample;
+                        for (DWORD SampleIndex = 0; SampleIndex < Region1Size; SampleIndex++)
+                        {
+                            int16 SampleValue = (RunningSampleIndex / HalfSquareWavePeriod) % 2 ? ToneVolume : -ToneVolume;
+                            *SampleOut++ = SampleValue;
+                            *SampleOut++ = SampleValue;
+                            RunningSampleIndex++;
+                        }
+
+                        SampleOut = (int16 *)Region2;
+                        DWORD Region2SampleCount = Region2Size / BytesPerSample;
+                        for (DWORD SampleIndex = 0; SampleIndex < Region2Size; SampleIndex++)
+                        {
+                            int16 SampleValue = (RunningSampleIndex / HalfSquareWavePeriod) % 2 ? ToneVolume : -ToneVolume;
+                            *SampleOut++ = SampleValue;
+                            *SampleOut++ = SampleValue;
+                            RunningSampleIndex++;
+                        }
+
+                        GlobalSecondaryBuffer->Unlock(Region1, Region1Size, Region2, Region2Size);
                     }
-                    int16 SampleValue = (SquareWaveCounter > (SquareWavePeriod / 2)) ? 16000 : -16000;
-                    *SampleOut++ = SampleValue;
-                    *SampleOut++ = SampleValue;
                 }
 
                 win32_window_dimensions Dimensions = Win32GetWindowDimensions(Window);
